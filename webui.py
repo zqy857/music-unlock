@@ -1169,6 +1169,18 @@ def _daemonize():
 
 def _stop_service():
     """Stop the running daemon."""
+    if _systemd_managed():
+        r = subprocess.run(
+            ["systemctl", *_systemctl_base(), "stop", UNIT_NAME],
+            capture_output=True, text=True, timeout=30,
+        )
+        if r.returncode == 0:
+            print("服务已停止")
+        else:
+            print("停止失败: " + (r.stderr.strip() or f"exit {r.returncode}"))
+            if os.geteuid() != 0 and _autostart_unit_path() == _system_unit_path():
+                print("提示: 该服务由系统级 systemd 单元管理，需 root 权限，可执行: sudo systemctl stop music-unlock.service")
+        return
     if not PID_PATH.exists():
         print("服务未运行")
         return
