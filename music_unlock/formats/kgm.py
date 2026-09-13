@@ -44,10 +44,12 @@ def load_pub_key() -> bytes:
 def classify(header: bytes):
     if header[:28] == _MAGIC_NEW:
         return "kgma"
-    if header[:16] == _MAGIC_KGM:
-        return "kgm"
-    if header[:16] == _MAGIC_VPR:
-        return "vpr"
+    if header[:16] == _MAGIC_KGM or header[:16] == _MAGIC_VPR:
+        if len(header) >= 0x18:
+            version = struct.unpack("<I", header[0x14:0x18])[0]
+            if version >= 4:
+                return "kgg"
+        return "kgm" if header[:16] == _MAGIC_KGM else "vpr"
     return None
 
 
@@ -56,7 +58,7 @@ class KgmFormat(BaseFormat):
     suffixes = ("kgm", "kgma", "vpr", "kgg", "vgm")
 
     def detect(self, header: bytes, extension: str) -> bool:
-        return classify(header) is not None
+        return classify(header) not in (None, "kgg")
 
     def decrypt(self, data: bytes) -> DecodeResult:
         kind = classify(data[:1024])

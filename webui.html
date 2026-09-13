@@ -542,6 +542,17 @@ html{scroll-behavior:smooth}
         </div>
       </div>
       <div class="box" style="max-width:560px">
+        <div class="boxhead"><h3>酷狗 KGG 密钥<span class="chip ok" style="margin-left:8px">上传后立即生效</span></h3></div>
+        <div class="hint" style="margin-bottom:8px">新版 <span class="mono">.kgg</span> 解密需要酷狗客户端 <span class="mono">KGMusicV3.db</span>（Windows: <span class="mono">%APPDATA%\KuGou8\</span>）或导出的静态 <span class="mono">kgg.key</span>（每行 <span class="mono">audioHash$ekey</span>）。上传任一即可。</div>
+        <div class="row" style="gap:8px;justify-content:flex-start">
+          <input type="file" id="kggFile" accept=".db,.key" class="grow" style="flex:1">
+          <button class="btn primary" onclick="uploadKgg()" title="上传到服务器并加载密钥映射">上传</button>
+          <button class="btn" onclick="loadKggStatus()" title="重新查询已加载状态">刷新状态</button>
+        </div>
+        <div id="kggStatus" style="margin-top:10px"><span class="hint">未加载</span></div>
+        <div class="hint" id="kggPath" style="margin-top:6px;word-break:break-all"></div>
+      </div>
+      <div class="box" style="max-width:560px">
         <div class="boxhead"><h3>支持格式</h3></div>
         <div id="fmtList" style="display:flex;flex-wrap:wrap;gap:8px;padding:2px 0 4px">
           <span class="hint">加载中…</span>
@@ -614,6 +625,7 @@ function route() {
   if (cur === "logs") loadLogs();
   if (cur === "output") loadOutput();
   if (cur === "settings") loadConfig();
+  if (cur === "settings") loadKggStatus();
   if (cur === "unlock") loadConfig();
 }
 
@@ -853,6 +865,42 @@ function scanAll() {
       toast("未找到加密文件");
     }
   });
+}
+
+async function loadKggStatus() {
+  const d = await api("/api/kgg/status");
+  const box = $("#kggStatus");
+  if (!box) return;
+  if (d.error) { box.innerHTML = '<span class="hint">状态获取失败</span>'; return; }
+  if (d.loaded && d.count > 0) {
+    box.innerHTML = `<span class="chip ok"><span class="dot"></span>已加载 ${d.count} 条密钥映射</span>`;
+  } else {
+    box.innerHTML = '<span class="hint">未加载密钥（上传 KGMusicV3.db 或 kgg.key 后启用 .kgg）</span>';
+  }
+  const src = [];
+  if (d.source) src.push("来源: " + d.source);
+  if (d.kgg_db) src.push("数据库: " + d.kgg_db);
+  if (d.kgg_key) src.push("kgg.key: " + d.kgg_key);
+  $("#kggPath").textContent = src.join("   ");
+}
+
+async function uploadKgg() {
+  const f = $("#kggFile").files[0];
+  if (!f) { toast("请先选择 .db 或 .key 文件"); return; }
+  $("#kggStatus").innerHTML = '<span class="hint">上传中…</span>';
+  const fd = new FormData();
+  fd.append("file", f);
+  const d = await api("/api/kgg/upload", { method: "POST", body: fd });
+  const r = (d.results || [])[0];
+  if (r && r.loaded) {
+    toast("KGG 密钥已加载（" + r.count + " 条）");
+    await loadKggStatus();
+  } else if (r && r.error) {
+    toast("上传失败: " + r.error);
+    loadKggStatus();
+  } else {
+    toast("上传失败，请重试");
+  }
 }
 
 async function loadConfig() {

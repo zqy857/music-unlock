@@ -21,10 +21,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-v", "--verbose", action="store_true", help="显示未识别格式的文件")
     p.add_argument("-t", "--selftest", action="store_true", help="运行自检后退出")
     p.add_argument("--list-formats", action="store_true", help="列出支持的加密格式")
+    p.add_argument("--kgg-db", metavar="PATH", help="酷狗 KGMusicV3.db 路径（解 .kgg 需要）")
+    p.add_argument("--kgg-key", metavar="PATH", help="导出的 kgg.key 密钥映射文件路径")
     return p
 
 
 def main() -> int:
+    from . import kgg_keys
     args = build_parser().parse_args()
 
     if args.selftest:
@@ -38,6 +41,16 @@ def main() -> int:
     if not args.target:
         build_parser().error("缺少目标文件/目录")
         return 2
+
+    if args.kgg_db or args.kgg_key:
+        try:
+            count = kgg_keys.configure(db_path=args.kgg_db, key_path=args.kgg_key)
+            print(f"已加载 {count} 条酷狗密钥映射（{kgg_keys.source()}）")
+        except kgg_keys.KggKeyError as e:
+            print(f"密钥映射加载失败: {e}")
+            if e.hint:
+                print(f"提示: {e.hint}")
+            return 1
 
     outdir = Path(args.outdir) if args.outdir else None
     files = collect_files(Path(args.target), args.recursive)

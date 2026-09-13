@@ -31,13 +31,16 @@
 
 | 格式 | 说明                                        | 解密方式                                    |
 |------|---------------------------------------------|---------------------------------------------|
-| KGM  | 酷狗加密音乐（含 KGMA / VPR / KGG 容器头）  | LZMA 压缩大表密钥 + V2 掩码异或             |
+| KGM  | 酷狗加密音乐（含 KGMA / VPR）               | LZMA 压缩大表密钥 + V2 掩码异或             |
+| KGG  | 酷狗新格式（header version≥4）              | 文件内明文 audioHash → 酷狗 `KGMusicV3.db`（SQLCipher）查 ekey → TEA/QMC2 流解密 |
 | KWM  | 酷我加密音乐                                | 32 字节掩码异或                             |
 | QMC  | QQ 音乐（qmc0/1/2/3、mflac、mgg…）         | Map / 静态表 / RC4 三种子算法 + TEA 密钥解密 |
 | NCM  | 网易云音乐（NCM 加密容器）                  | AES-128-ECB 元数据解密 + RC4 盒子解音频      |
 
-> 说明：酷狗近年部分 `.kgg`（header version=5）新格式密钥存放在酷狗客户端本地
-> `KGMusicV3.db`（SQLCipher）中，无法仅凭文件本身解出；旧版 `.kgm`/`.kgma`/`.vpr`（version=3）完整支持。
+> **KGG 新格式（version≥4）**需要酷狗密钥：上传酷狗客户端本地的
+> `KGMusicV3.db`（`%APPDATA%\KuGou8\`，SQLCipher 加密的 SQLite）或导出的静态
+> `kgg.key`（每行 `audioHash$ekey`），即可解开对应歌曲。旧版 `.kgm`/`.kgma`/`.vpr`
+> （version=3）无需任何密钥，开箱即用。
 
 ## 🚀 快速开始
 
@@ -51,7 +54,7 @@ python3 webui.py
 # 启动后自动打开浏览器
 python3 webui.py --open
 
-# 内置自检（AES/TEA/KGM/QMC 全部官方向量）
+# 内置自检（AES/TEA/KGM/QMC/KGG 全部官方向量）
 python3 unlock.py -t
 ```
 
@@ -63,6 +66,10 @@ python3 unlock.py -o ~/Music/解锁 -r ~/Music/加密
 
 # 覆盖已存在文件，成功后删除源文件
 python3 unlock.py -f -d ~/Music/加密
+
+# 导入酷狗密钥库 / 静态 kgg.key（KGG 新格式解密必需）
+python3 unlock.py --kgg-db ~/Desktop/KGMusicV3.db ~/Music/加密
+python3 unlock.py --kgg-key ~/Desktop/kgg.key ~/Music/加密
 ```
 
 | 参数             | 含义                                  |
@@ -74,6 +81,11 @@ python3 unlock.py -f -d ~/Music/加密
 | `-t`             | 运行内置自检后退出                     |
 | `--list-formats` | 列出支持的格式                         |
 | `-v`             | 输出跳过的原因                         |
+| `--kgg-db FILE`  | 指定酷狗 `KGMusicV3.db`（KGG 密钥库）  |
+| `--kgg-key FILE` | 指定静态映射 `kgg.key`（KGG 密钥）     |
+
+> 不传 `--kgg-db/--kgg-key` 时也会自动查找环境变量 `KGG_DB` / `KGG_KEY`、
+> WebUI 上传缓存与酷狗默认安装路径。kgg.key 为纯文本映射，可脱离 db 永久使用。
 
 ## 🌐 Web 界面
 
@@ -132,7 +144,8 @@ python3 unlock.py -t
 ```
 
 测试覆盖：AES-128 FIPS-197 向量、TEA 官方向量（mflac/mgg 密钥）、KGM 官方样本、
-QMC map/static/rc4 全部官方向量、KWM/NCM 自反性，以及跨分块大小的 KGM 一致性。
+QMC map/static/rc4 全部官方向量、KWM/NCM 自反性、跨分块大小的 KGM 一致性，
+以及 KGG 的 db 页派生官方向量、SQLCipher 库加密往返与 QMC2（MAP/RC4）音区往返。
 
 ## ✅ 已验证范围（重要）
 
@@ -141,6 +154,7 @@ QMC map/static/rc4 全部官方向量、KWM/NCM 自反性，以及跨分块大�
 | 格式 | 内置自检（官方向量） | 真实加密文件实测（WebUI / CLI） |
 |------|:----:|:----:|
 | 酷狗 KGM/KGMA/VPR | ✅ 通过 | ✅ 已用真实 `.kgm` 文件完整验证（命令行、WebUI 上传/下载、SSE 任务、输出管理均实测） |
+| 酷狗 KGG v5 | ✅ 通过（db 派生向量 + 往返） | ⚠️ 算法与官方逐行一致、链路自检全绿，但解密需真实 `KGMusicV3.db`，待你上传密钥库后连通验证 |
 | 酷我 KWM | ✅ 通过 | ⚠️ 未实测（无账号） |
 | QQ 音乐 QMC | ✅ 通过（map/static/rc4） | ⚠️ 未实测（无账号） |
 | 网易云 NCM | ✅ 通过（自反性） | ⚠️ 未实测（无账号） |
@@ -156,12 +170,15 @@ QMC map/static/rc4 全部官方向量、KWM/NCM 自反性，以及跨分块大�
 music_unlock/
 ├── core.py        # 统一解密管线（检测→解密→嗅探→重命名）
 ├── cli.py         # 命令行入口
+├── kgg_keys.py    # KGG 密钥映射全局管理（db/kgg.key/env/自动发现）
 ├── sniff.py       # 音频格式嗅探
 ├── crypto/
-│   ├── aes.py     # 纯 Python AES-128-ECB（可选 pycryptodome 加速）
-│   └── tea.py     # TEA 加解密 + QMC 密钥处理
+│   ├── aes.py     # 纯 Python AES-128-ECB/CBC（可选 pycryptodome 加速）
+│   ├── tea.py     # TEA 加解密 + QMC/KGG ekey（V1/V2）处理
+│   └── kgg_db.py  # KGMusicV3.db（SQLCipher）解密 + kgg.key 导出/导入
 ├── formats/
-│   ├── kgm.py     # 酷狗 KGM/KGMA/VPR
+│   ├── kgm.py     # 酷狗 KGM/KGMA/VPR（并分流 v5 → kgg）
+│   ├── kgg.py     # 酷狗 KGG 新格式（v5，audioHash→ekey→QMC2）
 │   ├── kwm.py     # 酷我
 │   ├── qmc.py     # QQ 音乐
 │   └── ncm.py     # 网易云
@@ -175,7 +192,8 @@ webui.html          # 前端 SPA（暗色主题控制台：概览/文件/任务/
 
 本工具不含任何自研破解，**所有解密算法均为开源社区逆向成果**，本项目只是把参考实现逐行翻译成 Python 并用其官方向量验证。
 
-- **[unlock-music](https://git.unlock-music.dev/um/web)** / **[unlock-music/cli](https://git.unlock-music.dev/um/cli)**（MIT）：QMC、KWM、NCM 及 KGM 的算法实现与测试向量，全部从 Go 版 CLI 逐行移植，kugou 公钥最初亦由其提供。
+- **[unlock-music](https://git.unlock-music.dev/um/web)** / **[unlock-music/cli](https://git.unlock-music.dev/um/cli)**（MIT）：QMC、KWM、NCM、KGM 及 KGG 的算法实现与测试向量，全部从 Go 版 CLI 逐行移植（含 `pc_kugou_db` 的 SQLCipher 页派生与页 1 校验）；kugou 公钥最初亦由其提供。
+- **[skxxxkx666/Kugo-Music-Converter](https://github.com/skxxxkx666/Kugo-Music-Converter)** / **[PineVigil/kugou-decryptor](https://github.com/PineVigil/kugou-decryptor)**（Go / Python）：KGG v5 与 `KGMusicV3.db` 解密的交叉对照实现。
 - **孤心浪子的博客《酷狗音乐 kgm 解密》**（[cnblogs.com/KMBlog/p/6877752.html](https://www.cnblogs.com/KMBlog/p/6877752.html)）：KGM 算法原理的公开来源。
 - **[ghtz08/kuguo-kgm-decoder](https://github.com/ghtz08/kuguo-kgm-decoder)**（Rust）：KGM 参考实现与 `kugou_key.xz` 大表密钥的来源。
 - TEA 参考 [golang.org/x/crypto/tea](https://pkg.go.dev/golang.org/x/crypto/tea)（BSD）。

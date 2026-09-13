@@ -180,6 +180,55 @@ class AES128ECB:
         return self._impl.encrypt(data)
 
 
+class _PureAES128CBC:
+    def __init__(self, key: bytes, iv: bytes):
+        if len(key) != 16 or len(iv) != 16:
+            raise ValueError("AES-128-CBC 要求 16 字节密钥与 IV")
+        self._ecb = _PureAES128ECB(key)
+        self._iv = bytes(iv)
+
+    def decrypt(self, data: bytes) -> bytes:
+        if len(data) % 16:
+            raise ValueError("数据长度必须为 16 的倍数")
+        out = bytearray(len(data))
+        prev = self._iv
+        for off in range(0, len(data), 16):
+            cur = data[off:off + 16]
+            d = self._ecb.decrypt(cur)
+            for i in range(16):
+                out[off + i] = d[i] ^ prev[i]
+            prev = cur
+        return bytes(out)
+
+    def encrypt(self, data: bytes) -> bytes:
+        if len(data) % 16:
+            raise ValueError("数据长度必须为 16 的倍数")
+        out = bytearray(len(data))
+        prev = self._iv
+        for off in range(0, len(data), 16):
+            cur = data[off:off + 16]
+            e = self._ecb.encrypt(bytes(a ^ b for a, b in zip(cur, prev)))
+            out[off:off + 16] = e
+            prev = bytes(e)
+        return bytes(out)
+
+
+class AES128CBC:
+    __slots__ = ("_impl",)
+
+    def __init__(self, key: bytes, iv: bytes):
+        if _HAVE_PYCRYPTODOME:
+            self._impl = _PyCryptodomeAES.new(key, _PyCryptodomeAES.MODE_CBC, iv)
+        else:
+            self._impl = _PureAES128CBC(key, iv)
+
+    def decrypt(self, data: bytes) -> bytes:
+        return self._impl.decrypt(data)
+
+    def encrypt(self, data: bytes) -> bytes:
+        return self._impl.encrypt(data)
+
+
 def pkcs7_unpad(data: bytes) -> bytes:
     if not data:
         return data

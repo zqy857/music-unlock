@@ -33,6 +33,7 @@ from pathlib import Path
 
 from music_unlock.core import decrypt_bytes, decrypt_file
 from music_unlock.formats import FORMATS, DecryptError, _ENCRYPTED_SUFFIXES, detect_format
+from music_unlock import kgg_keys
 from music_unlock.sniff import sniff_audio
 
 APP_NAME = "music-unlock"
@@ -43,6 +44,8 @@ CONFIG_PATH = PROJECT_ROOT / "config.json"
 JOBS_PATH = BASE_DIR / "jobs.json"
 LOG_PATH = BASE_DIR / "service.log"
 PID_PATH = BASE_DIR / "pid"
+KGG_DB_CACHE = BASE_DIR / "KGMusicV3.db"
+KGG_KEY_CACHE = BASE_DIR / "kgg.key"
 _HTML_PATH = PROJECT_ROOT / "webui.html"
 _VERSION = "0.3.0"
 _UPLOAD_TTL = 600
@@ -92,6 +95,8 @@ class Config:
         "delete_source": False,
         "recursive": False,
         "concurrency": 3,
+        "kgg_db": "",
+        "kgg_key": "",
     }
 
     def __init__(self, path: Path | None = None):
@@ -508,6 +513,24 @@ def _output_dir() -> Path:
     return Path(cfg.get("outdir")) if cfg.get("outdir") else PROJECT_ROOT / "output"
 
 
+def _load_kgg_from_config() -> None:
+    """启动时按 config 里的 kgg_db / kgg_key 预加载酷狗密钥映射。"""
+    cfg = CONFIG.get()
+    for key, cls in (("kgg_db", "db"), ("kgg_key", "key")):
+        path = cfg.get(key)
+        if not path or not Path(path).is_file():
+            continue
+        try:
+            if cls == "db":
+                n = kgg_keys.configure(db_path=path)
+            else:
+                n = kgg_keys.configure(key_path=path)
+            log(f"酷狗密钥库已加载: {path} ({n} 条)")
+        except kgg_keys.KggKeyError as e:
+            log(f"酷狗密钥库加载失败: {path} ({e})", "warn")
+        return
+
+
 def _list_output_files() -> list[dict]:
     """List files in the output directory."""
     outdir = _output_dir()
@@ -645,6 +668,17 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/config":
             return self._json({"config": CONFIG.get()})
+
+        if path == "/api/kgg/status":
+            km = kgg_keys.get()
+            cfg = CONFIG.get()
+            return self._json({
+                "loaded": km is not None,
+                "count": len(km) if km else 0,
+                "source": kgg_keys.source(),
+                "kgg_db": cfg.get("kgg_db", ""),
+                "kgg_key": cfg.get("kgg_key", ""),
+            })
 
         if path == "/api/explore":
             d = qs.get("dir", "")
@@ -797,6 +831,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/upload":
             return self._handle_upload()
 
+        if path == "/api/kgg/upload":
+            return self._handle_kgg_upload()
+
         if path == "/api/output/delete":
             body = self._parse_json()
             names = body.get("names") or body.get("files") or []
@@ -898,6 +935,60 @@ class Handler(BaseHTTPRequestHandler):
                 results.append({"name": fname, "error": str(e)})
             except Exception as e:
                 results.append({"name": fname, "error": str(e)})
+        return self._json({"results": results})
+
+    def _handle_kgg_upload(self):
+        """Upload KGMusicV3.db 或 kgg.key，解密后缓存并加载酷狗密钥映射。"""
+        content_type = self.headers.get("Content-Type", "")
+        if "multipart/form-data" not in content_type:
+            return self._json({"error": "需要 multipart/form-data"}, 400)
+
+        boundary = ""
+        for part in content_type.split(";"):
+            part = part.strip()
+            if part.startswith("boundary="):
+                boundary = part[9:]
+        if not boundary:
+            return self._json({"error": "缺少 boundary"}, 400)
+
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length)
+        parts = self._parse_multipart(body, boundary)
+
+        results = []
+        BASE_DIR.mkdir(parents=True, exist_ok=True)
+        for fname, fdata in parts:
+            if not fname or not fdata:
+                continue
+            low = fname.lower()
+            try:
+                if low.endswith(".db"):
+                    KGG_DB_CACHE.write_bytes(fdata)
+                    n = kgg_keys.configure(db_path=str(KGG_DB_CACHE))
+                    CONFIG.update({"kgg_db": str(KGG_DB_CACHE)})
+                    log(f"酷狗密钥库上传成功: {len(fdata)} bytes, {n} 条映射")
+                    results.append({
+                        "name": fname, "loaded": True, "type": "db",
+                        "count": n, "source": kgg_keys.source(),
+                    })
+                elif low.endswith(".key") or low.endswith(".kgg.key"):
+                    KGG_KEY_CACHE.write_bytes(fdata)
+                    n = kgg_keys.configure(key_path=str(KGG_KEY_CACHE))
+                    CONFIG.update({"kgg_key": str(KGG_KEY_CACHE)})
+                    log(f"kgg.key 上传成功: {n} 条映射")
+                    results.append({
+                        "name": fname, "loaded": True, "type": "key",
+                        "count": n, "source": kgg_keys.source(),
+                    })
+                else:
+                    results.append({"name": fname, "error": "仅支持 .db 或 .key 文件"})
+            except kgg_keys.KggKeyError as e:
+                results.append({
+                    "name": fname, "error": str(e),
+                    "hint": getattr(e, "hint", ""),
+                })
+            except OSError as e:
+                results.append({"name": fname, "error": f"保存失败: {e}"})
         return self._json({"results": results})
 
     def _parse_multipart(self, body: bytes, boundary: str) -> list[tuple[str, bytes]]:
@@ -1017,6 +1108,8 @@ def main():
     cfg = CONFIG.get()
     host = args.host or cfg.get("host", "127.0.0.1")
     port = args.port or cfg.get("port", 8765)
+
+    _load_kgg_from_config()
 
     if args.daemon:
         start_server(host, port, background=True)
