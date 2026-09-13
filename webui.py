@@ -47,6 +47,14 @@ JOBS_PATH = BASE_DIR / "jobs.json"
 LOG_PATH = BASE_DIR / "service.log"
 PID_PATH = BASE_DIR / "pid"
 _HTML_PATH = PROJECT_ROOT / "webui.html"
+
+_FAVICON = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+<stop offset="0" stop-color="#8a6bff"/><stop offset="1" stop-color="#4fc3f7"/>
+</linearGradient></defs>
+<rect width="64" height="64" rx="14" fill="#171b29"/>
+<path d="M26 14v26.3a10.6 10.6 0 1 0 5 9.2V26h15V14z" fill="url(#g)"/>
+</svg>'''.encode("utf-8")
 _VERSION = "0.3.0"
 _UPLOAD_TTL = 600
 SERVER_START = time.time()
@@ -646,6 +654,15 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         qs = dict(urllib.parse.parse_qsl(parsed.query))
+
+        if path in ("/favicon.ico", "/favicon.svg"):
+            self.send_response(200)
+            self.send_header("Content-Type", "image/svg+xml; charset=utf-8")
+            self.send_header("Content-Length", str(len(_FAVICON)))
+            self.send_header("Cache-Control", "public, max-age=86400")
+            self.end_headers()
+            self._write(_FAVICON)
+            return
 
         if path == "/api/events":
             return self._handle_sse()
