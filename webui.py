@@ -23,6 +23,8 @@ import queue
 import secrets
 import shutil
 import ssl
+import subprocess
+import sys
 import threading
 import time
 import urllib.parse
@@ -47,6 +49,11 @@ _HTML_PATH = PROJECT_ROOT / "webui.html"
 _VERSION = "0.3.0"
 _UPLOAD_TTL = 600
 SERVER_START = time.time()
+
+_MAIN_SERVER = None
+UNIT_DIR = Path.home() / ".config/systemd/user"
+UNIT_NAME = "music-unlock.service"
+UNIT_PATH = UNIT_DIR / UNIT_NAME
 
 
 class Log:
@@ -718,6 +725,9 @@ class Handler(BaseHTTPRequestHandler):
                 "formats": [f.name for f in FORMATS],
             })
 
+        if path == "/api/service":
+            return self._json(_service_info())
+
         if path == "/api/bing":
             count = int(qs.get("n", "8"))
             urls = _fetch_bing(count)
@@ -802,6 +812,67 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/upload":
             return self._handle_upload()
+
+        if path == "/api/service/stop":
+            self._json({"ok": True, "msg": "服务即将停止"})
+            log("服务管理: 收到停止请求")
+
+            def _shutdown():
+                global _MAIN_SERVER
+                try:
+                    if _MAIN_SERVER is not None:
+                        _MAIN_SERVER.shutdown()
+                except Exception:
+                    pass
+                threading.Timer(5.0, lambda: os._exit(0)).start()
+
+            threading.Timer(0.5, _shutdown).start()
+            return
+
+        if path == "/api/service/restart":
+            self._json({"ok": True, "msg": "服务即将重启"})
+            log("服务管理: 收到重启请求")
+
+            def _restart():
+                time.sleep(0.5)
+                argv = sys.argv[:]
+                argv[0] = os.path.abspath(argv[0])
+                os.execv(sys.executable, [sys.executable] + argv)
+
+            threading.Thread(target=_restart, daemon=True).start()
+            return
+
+        if path == "/api/service/autostart":
+            body = self._parse_json()
+            enable = bool(body.get("enable"))
+            if not shutil.which("systemctl"):
+                return self._json({"error": "系统未检测到 systemd，无法设置开机自启"}, 400)
+            try:
+                if enable:
+                    UNIT_DIR.mkdir(parents=True, exist_ok=True)
+                    unit = (
+                        "[Unit]\n"
+                        "Description=Music Unlock Web Service\n"
+                        "After=network.target\n\n"
+                        "[Service]\n"
+                        "Type=simple\n"
+                        f"WorkingDirectory={PROJECT_ROOT}\n"
+                        f"ExecStart={sys.executable} {os.path.abspath(sys.argv[0])}\n"
+                        "Restart=on-failure\n"
+                        "RestartSec=3\n\n"
+                        "[Install]\n"
+                        "WantedBy=default.target\n"
+                    )
+                    UNIT_PATH.write_text(unit, "utf-8")
+                    subprocess.run(["systemctl", "--user", "daemon-reload"], check=True, capture_output=True, timeout=30)
+                    subprocess.run(["systemctl", "--user", "enable", UNIT_NAME], check=True, capture_output=True, timeout=30)
+                    log("服务管理: 已开启开机自启 (systemd unit)")
+                    return self._json({"ok": True, "enabled": True, "autostart_enabled": _autostart_enabled()})
+                subprocess.run(["systemctl", "--user", "disable", UNIT_NAME], capture_output=True, timeout=30)
+                log("服务管理: 已关闭开机自启")
+                return self._json({"ok": True, "enabled": False, "autostart_enabled": False})
+            except (subprocess.SubprocessError, OSError) as e:
+                return self._json({"error": f"systemd 操作失败: {e}"}, 500)
 
         if path == "/api/output/delete":
             body = self._parse_json()
@@ -939,6 +1010,8 @@ class Handler(BaseHTTPRequestHandler):
 def start_server(host: str, port: int, background: bool = False, open_browser: bool = False):
     """Start the HTTP server."""
     server = ThreadingHTTPServer((host, port), Handler)
+    global _MAIN_SERVER
+    _MAIN_SERVER = server
     display_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
     log(f"服务启动: http://{display_host}:{port}")
     if open_browser:
@@ -1003,6 +1076,54 @@ def _status_service():
     except (ValueError, ProcessLookupError):
         print("服务未运行 (残留 PID 文件)")
         PID_PATH.unlink(missing_ok=True)
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except (ValueError, OSError):
+        return False
+    return True
+
+
+def _autostart_enabled() -> bool:
+    if not UNIT_PATH.exists():
+        return False
+    try:
+        r = subprocess.run(
+            ["systemctl", "--user", "is-enabled", UNIT_NAME],
+            capture_output=True, text=True, timeout=15,
+        )
+        return r.stdout.strip() == "enabled"
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _systemd_managed() -> bool:
+    return bool(os.environ.get("INVOCATION_ID") or os.environ.get("SYSTEMD_USER_UNIT"))
+
+
+def _service_info() -> dict:
+    pid_file_pid = None
+    if PID_PATH.exists():
+        try:
+            pid_file_pid = int(PID_PATH.read_text("utf-8").strip())
+        except ValueError:
+            pid_file_pid = None
+    self_pid = os.getpid()
+    pid = pid_file_pid if (pid_file_pid and _pid_alive(pid_file_pid)) else self_pid
+    return {
+        "running": True,
+        "pid": pid,
+        "daemon": bool(os.getppid() == 1),
+        "systemd_managed": _systemd_managed(),
+        "systemd_unit": UNIT_PATH.exists(),
+        "autostart_enabled": _autostart_enabled(),
+        "version": _VERSION,
+        "pid_file": str(PID_PATH),
+        "log_file": str(LOG_PATH),
+        "log_size": LOG_PATH.stat().st_size if LOG_PATH.exists() else 0,
+    }
 
 
 def main():

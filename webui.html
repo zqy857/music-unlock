@@ -537,9 +537,18 @@ html{scroll-behavior:smooth}
       </div>
       <div class="box" style="max-width:560px">
         <div class="boxhead"><h3>服务管理</h3></div>
-        <div class="row">
-          <span class="hint">守护进程使用 <span class="mono">python webui.py --daemon / --stop / --status</span></span>
+        <div class="jobmeta" id="svcInfo">
+          <div>状态: <b id="svcStatus">--</b></div>
+          <div>PID: <b id="svcPid">--</b></div>
+          <div>运行模式: <b id="svcMode">--</b></div>
+          <div>开机自启: <b id="svcAutostart">--</b></div>
         </div>
+        <div class="row" style="margin-top:12px;flex-wrap:wrap">
+          <button class="btn primary" id="svcAutoBtn" onclick="toggleAutostart()">加载中…</button>
+          <button class="btn" id="svcRestartBtn" onclick="svcRestart()">重启服务</button>
+          <button class="btn danger" id="svcStopBtn" onclick="svcStop()">关闭服务</button>
+        </div>
+        <div class="hint" style="margin-top:10px">「开启开机自启」会创建 systemd 用户单元，登录后自动运行；不影响当前进程。「重启/关闭」立即生效，浏览器会短暂断开，几秒后自动刷新恢复。</div>
       </div>
       <div class="box" style="max-width:560px">
         <div class="boxhead"><h3>支持格式</h3></div>
@@ -613,7 +622,7 @@ function route() {
   if (cur === "dash") loadHealth();
   if (cur === "logs") loadLogs();
   if (cur === "output") loadOutput();
-  if (cur === "settings") loadConfig();
+  if (cur === "settings") { loadConfig(); loadServiceStatus(); }
   if (cur === "unlock") loadConfig();
 }
 
@@ -895,6 +904,73 @@ async function saveConfig() {
   if (d.error) { toast("保存失败: " + d.error); return; }
   toast("设置已保存");
   if ($("#cfgMsg")) { $("#cfgMsg").textContent = "已保存 ✓"; setTimeout(() => { if ($("#cfgMsg")) $("#cfgMsg").textContent = ""; }, 2500); }
+}
+
+async function loadServiceStatus() {
+  const d = await api("/api/service");
+  const stEl = $("#svcStatus");
+  if (d.error || !d.running) {
+    if (stEl) { stEl.textContent = "已停止"; stEl.style.color = "var(--err)"; }
+    const b = $("#svcRestartBtn"), c = $("#svcStopBtn"), a = $("#svcAutoBtn");
+    if (b) b.disabled = true; if (c) c.disabled = true;
+    if (a) { a.textContent = "设置开机自启"; a.classList.add("primary"); a.disabled = true; }
+    return;
+  }
+  stEl.textContent = "运行中"; stEl.style.color = "var(--ok)";
+  if ($("#svcPid")) $("#svcPid").textContent = d.pid;
+  if ($("#svcVersion")) $("#svcVersion").textContent = d.version;
+  const modeEl = $("#svcMode");
+  if (modeEl) {
+    modeEl.textContent = d.systemd_managed ? "systemd 管理"
+      : d.daemon ? "后台守护 (daemon)" : "前台运行";
+  }
+  const autoEl = $("#svcAutostart");
+  if (autoEl) {
+    autoEl.textContent = d.autostart_enabled ? "已开启 (systemd)" : "未开启";
+    autoEl.style.color = d.autostart_enabled ? "var(--ok)" : "var(--muted)";
+  }
+  const a = $("#svcAutoBtn");
+  if (a) {
+    a.disabled = false;
+    if (d.autostart_enabled) {
+      a.textContent = "关闭开机自启";
+      a.classList.remove("primary"); a.classList.add("danger");
+    } else {
+      a.textContent = "开启开机自启";
+      a.classList.remove("danger"); a.classList.add("primary");
+    }
+  }
+}
+
+async function toggleAutostart() {
+  const d = await api("/api/service");
+  if (d.error || d.running === false) { toast("服务状态异常，无法操作"); return; }
+  const enable = !d.autostart_enabled;
+  if (!confirm(enable
+    ? "确认开启开机自启？\n将创建 systemd 用户单元（~/.config/systemd/user/music-unlock.service），\n登录后自动运行。当前进程不受影响。"
+    : "确认关闭开机自启？\n将停用 systemd 用户单元，下次登录不再自动运行。")) return;
+  const r = await api("/api/service/autostart", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({enable}),
+  });
+  if (r.error) { toast("操作失败: " + r.error); return; }
+  toast(enable ? "已开启开机自启" : "已关闭开机自启");
+  loadServiceStatus();
+}
+
+async function svcRestart() {
+  if (!confirm("确认重启服务？\n约 2 秒内断开，随后自动恢复。")) return;
+  toast("正在重启服务…");
+  await api("/api/service/restart", {method: "POST"});
+  setTimeout(() => location.reload(), 3500);
+}
+
+async function svcStop() {
+  if (!confirm("确认关闭服务？\n服务将停止运行，之后需手动重新启动：\n终端执行 python3 webui.py --daemon\n或 systemctl --user start music-unlock")) return;
+  toast("正在停止服务…");
+  await api("/api/service/stop", {method: "POST"});
+  setTimeout(() => { location.hash = "#/settings"; location.reload(); }, 3500);
 }
 
 async function loadFormats() {
