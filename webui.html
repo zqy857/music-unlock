@@ -540,7 +540,7 @@ html{scroll-behavior:smooth}
         <div class="jobmeta" id="svcInfo">
           <div>状态: <b id="svcStatus">--</b></div>
           <div>PID: <b id="svcPid">--</b></div>
-          <div>运行模式: <b id="svcMode">--</b></div>
+          <div>运行模式: <b id="svcMode">--</b><span id="svcTls" style="margin-left:.5rem;display:none"></span></div>
           <div>开机自启: <b id="svcAutostart">--</b></div>
         </div>
         <div class="row" style="margin-top:12px;flex-wrap:wrap">
@@ -923,6 +923,17 @@ async function loadServiceStatus() {
   if (modeEl) {
     modeEl.textContent = d.systemd_managed ? "systemd 管理"
       : d.daemon ? "后台守护 (daemon)" : "前台运行";
+  }
+  const tlsEl = $("#svcTls");
+  if (tlsEl) {
+    tlsEl.textContent = d.tls ? "[HTTPS]" : "[HTTP]";
+    tlsEl.style.display = "inline";
+    tlsEl.style.padding = ".05rem .4rem";
+    tlsEl.style.border = "1px solid " + (d.tls ? "var(--ok)" : "var(--muted)");
+    tlsEl.style.borderRadius = "8px";
+    tlsEl.style.fontSize = ".72rem";
+    tlsEl.style.color = d.tls ? "var(--ok)" : "var(--muted)";
+    tlsEl.title = "当前为 " + (d.tls ? "HTTPS（自签证书，手机端如遇证书告警点「继续访问」）" : "HTTP") + " 访问";
   }
   const autoEl = $("#svcAutostart");
   if (autoEl) {

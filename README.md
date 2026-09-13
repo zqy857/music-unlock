@@ -85,9 +85,14 @@ python3 unlock.py -f -d ~/Music/加密
 
 ```bash
 python3 webui.py --daemon    # 后台守护进程常驻运行
+python3 webui.py --tls       # 启用 HTTPS（自签证书，首次生成于 ~/.music-unlock/tls/）
 python3 webui.py --status    # 查看服务是否在运行
 python3 webui.py --stop      # 优雅停止后台服务
 ```
+
+> 手机浏览器（Chrome/Edge）可能自动把 `http://` 升级为 HTTPS 访问，导致解密上传失败。若遇到，请
+> 关闭浏览器的「自动升级不安全连接」，或改用 `python3 webui.py --tls` 让服务本身支持 HTTPS
+> （首次访问会提示自签证书不受信任，选择「继续访问」即可）。
 
 控制台为单页应用，包含四个页面：
 

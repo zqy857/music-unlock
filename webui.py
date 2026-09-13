@@ -8,6 +8,7 @@
   python webui.py --stop          # 停止后台服务
   python webui.py --status        # 查看服务状态
   python webui.py --port 9000     # 覆盖配置文件端口
+  python webui.py --tls           # 启用 HTTPS(自签证书, 处理浏览器自动升级至 HTTPS)
 
 配置文件默认存到项目根 config.json (如已存在旧的 ~/.music-unlock/config.json 则沿用),
 任务历史与守护日志仍放在 ~/.music-unlock/。
@@ -64,6 +65,7 @@ _UPLOAD_TTL = 600
 SERVER_START = time.time()
 
 _MAIN_SERVER = None
+_SERVER_TLS = False
 UNIT_DIR = Path.home() / ".config/systemd/user"
 UNIT_NAME = "music-unlock.service"
 UNIT_PATH = UNIT_DIR / UNIT_NAME
@@ -112,6 +114,7 @@ class Config:
         "delete_source": False,
         "recursive": False,
         "concurrency": 3,
+        "tls": False,
     }
 
     def __init__(self, path: Path | None = None):
@@ -906,7 +909,8 @@ class Handler(BaseHTTPRequestHandler):
                         "[Service]\n"
                         "Type=simple\n"
                         f"WorkingDirectory={PROJECT_ROOT}\n"
-                        f"ExecStart={sys.executable} {os.path.abspath(sys.argv[0])}\n"
+                        f"ExecStart={sys.executable} {os.path.abspath(sys.argv[0])}"
+                        f"{' --tls' if '--tls' in sys.argv or CONFIG.get().get('tls') else ''}\n"
                         "Restart=on-failure\n"
                         "RestartSec=3\n\n"
                         "[Install]\n"
@@ -1067,15 +1071,64 @@ class Handler(BaseHTTPRequestHandler):
         return parts
 
 
-def start_server(host: str, port: int, background: bool = False, open_browser: bool = False):
-    """Start the HTTP server."""
-    server = ThreadingHTTPServer((host, port), Handler)
-    global _MAIN_SERVER
+def _ensure_tls_certs() -> tuple[Path, Path] | None:
+    """Generate (or reuse) a self-signed certificate for HTTPS. Returns None on failure."""
+    d = BASE_DIR / "tls"
+    cert, key = d / "cert.pem", d / "key.pem"
+    if cert.exists() and key.exists():
+        return cert, key
+    d.mkdir(parents=True, exist_ok=True)
+    try:
+        subprocess.run(
+            ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+             "-days", "825", "-keyout", str(key), "-out", str(cert),
+             "-subj", "/CN=music-unlock.local/O=music-unlock"],
+            check=True, capture_output=True, timeout=60)
+    except Exception as e:
+        log(f"生成 TLS 自签证书失败: {e}", "warn")
+        return None
+    try:
+        os.chmod(key, 0o600)
+    except Exception:
+        pass
+    return cert, key
+
+
+class _SecureHTTPServer(ThreadingHTTPServer):
+    """HTTPServer that wraps each accepted connection in TLS."""
+
+    def __init__(self, addr, handler, tls_ctx=None):
+        self._tls_ctx = tls_ctx
+        super().__init__(addr, handler)
+
+    def get_request(self):
+        sock, addr = super().get_request()
+        if self._tls_ctx is not None:
+            sock = self._tls_ctx.wrap_socket(sock, server_side=True)
+        return sock, addr
+
+
+def start_server(host: str, port: int, background: bool = False, open_browser: bool = False, tls: bool = False):
+    """Start the HTTP(S) server."""
+    global _MAIN_SERVER, _SERVER_TLS
+    tls_ctx = None
+    if tls:
+        certs = _ensure_tls_certs()
+        if certs is None:
+            log("无法启用 HTTPS(缺少证书生成工具), 已回退到 HTTP", "warn")
+            tls = False
+        else:
+            tls_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            tls_ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+            tls_ctx.load_cert_chain(str(certs[0]), str(certs[1]))
+    _SERVER_TLS = tls
+    server = _SecureHTTPServer((host, port), Handler, tls_ctx)
     _MAIN_SERVER = server
     display_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
-    log(f"服务启动: http://{display_host}:{port}")
+    scheme = "https" if tls else "http"
+    log(f"服务启动: {scheme}://{display_host}:{port}")
     if open_browser:
-        threading.Timer(1.0, lambda: webbrowser.open(f"http://{display_host}:{port}")).start()
+        threading.Timer(1.0, lambda: webbrowser.open(f"{scheme}://{display_host}:{port}")).start()
     if background:
         _daemonize()
 
@@ -1180,6 +1233,7 @@ def _service_info() -> dict:
         "systemd_unit": UNIT_PATH.exists(),
         "autostart_enabled": _autostart_enabled(),
         "version": _VERSION,
+        "tls": bool(_SERVER_TLS),
         "pid_file": str(PID_PATH),
         "log_file": str(LOG_PATH),
         "log_size": LOG_PATH.stat().st_size if LOG_PATH.exists() else 0,
@@ -1194,6 +1248,8 @@ def main():
     parser.add_argument("--open", action="store_true", help="启动后自动打开浏览器")
     parser.add_argument("--port", type=int, help="覆盖配置文件端口")
     parser.add_argument("--host", type=str, help="覆盖配置文件地址")
+    parser.add_argument("--tls", action="store_true", default=None, help="启用 HTTPS(自签证书)")
+    parser.add_argument("--no-tls", dest="tls", action="store_false", help="禁用 HTTPS")
     args = parser.parse_args()
 
     if args.stop:
@@ -1204,11 +1260,12 @@ def main():
     cfg = CONFIG.get()
     host = args.host or cfg.get("host", "127.0.0.1")
     port = args.port or cfg.get("port", 8765)
+    tls = cfg.get("tls", False) if args.tls is None else args.tls
 
     if args.daemon:
-        start_server(host, port, background=True)
+        start_server(host, port, background=True, tls=tls)
     else:
-        start_server(host, port, background=False, open_browser=args.open)
+        start_server(host, port, background=False, open_browser=args.open, tls=tls)
 
 
 if __name__ == "__main__":
