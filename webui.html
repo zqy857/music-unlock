@@ -562,7 +562,7 @@ html{scroll-behavior:smooth}
           <button class="btn" id="svcRestartBtn" onclick="svcRestart()">重启服务</button>
           <button class="btn danger" id="svcStopBtn" onclick="svcStop()">关闭服务</button>
         </div>
-        <div class="hint" style="margin-top:10px">「开启开机自启」会创建 systemd 用户单元，登录后自动运行；不影响当前进程。「重启/关闭」立即生效，浏览器会短暂断开，几秒后自动刷新恢复。</div>
+        <div class="hint" style="margin-top:10px">「开启开机自启」会创建 systemd 单元，开机后自动运行；不影响当前进程。「重启/关闭」立即生效，浏览器会短暂断开，几秒后自动刷新恢复。</div>
       </div>
       <div class="box" style="max-width:560px">
         <div class="boxhead"><h3>支持格式</h3></div>
@@ -972,8 +972,8 @@ async function toggleAutostart() {
   if (d.error || d.running === false) { toast("服务状态异常，无法操作"); return; }
   const enable = !d.autostart_enabled;
   if (!confirm(enable
-    ? "确认开启开机自启？\n将创建 systemd 用户单元（~/.config/systemd/user/music-unlock.service），\n登录后自动运行。当前进程不受影响。"
-    : "确认关闭开机自启？\n将停用 systemd 用户单元，下次登录不再自动运行。")) return;
+    ? "确认开启开机自启？\n将创建 systemd 单元，开机后自动运行。\n当前进程不受影响。"
+    : "确认关闭开机自启？\n将停用 systemd 单元，下次开机不再自动运行。")) return;
   const r = await api("/api/service/autostart", {
     method: "POST",
     headers: {"Content-Type": "application/json"},

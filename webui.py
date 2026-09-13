@@ -891,9 +891,11 @@ class Handler(BaseHTTPRequestHandler):
             enable = bool(body.get("enable"))
             if not shutil.which("systemctl"):
                 return self._json({"error": "系统未检测到 systemd，无法设置开机自启"}, 400)
+            unit_path = _autostart_unit_path()
+            wanted = "multi-user.target" if os.geteuid() == 0 else "default.target"
             try:
                 if enable:
-                    UNIT_DIR.mkdir(parents=True, exist_ok=True)
+                    unit_path.parent.mkdir(parents=True, exist_ok=True)
                     unit = (
                         "[Unit]\n"
                         "Description=Music Unlock Web Service\n"
@@ -906,14 +908,14 @@ class Handler(BaseHTTPRequestHandler):
                         "Restart=on-failure\n"
                         "RestartSec=3\n\n"
                         "[Install]\n"
-                        "WantedBy=default.target\n"
+                        f"WantedBy={wanted}\n"
                     )
-                    UNIT_PATH.write_text(unit, "utf-8")
-                    subprocess.run(["systemctl", "--user", "daemon-reload"], check=True, capture_output=True, timeout=30)
-                    subprocess.run(["systemctl", "--user", "enable", UNIT_NAME], check=True, capture_output=True, timeout=30)
-                    log("服务管理: 已开启开机自启 (systemd unit)")
+                    unit_path.write_text(unit, "utf-8")
+                    subprocess.run(["systemctl", *_systemctl_base(), "daemon-reload"], check=True, capture_output=True, timeout=30)
+                    subprocess.run(["systemctl", *_systemctl_base(), "enable", UNIT_NAME], check=True, capture_output=True, timeout=30)
+                    log(f"服务管理: 已开启开机自启 (systemd unit {unit_path})")
                     return self._json({"ok": True, "enabled": True, "autostart_enabled": _autostart_enabled()})
-                subprocess.run(["systemctl", "--user", "disable", UNIT_NAME], capture_output=True, timeout=30)
+                subprocess.run(["systemctl", *_systemctl_base(), "disable", UNIT_NAME], capture_output=True, timeout=30)
                 log("服务管理: 已关闭开机自启")
                 return self._json({"ok": True, "enabled": False, "autostart_enabled": False})
             except (subprocess.SubprocessError, OSError) as e:
@@ -1199,12 +1201,23 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
+def _autostart_unit_path() -> Path:
+    """root 用系统级 unit，普通用户用 user 级 unit。"""
+    if os.geteuid() == 0:
+        return Path("/etc/systemd/system") / UNIT_NAME
+    return UNIT_DIR / UNIT_NAME
+
+
+def _systemctl_base() -> list[str]:
+    return [] if os.geteuid() == 0 else ["--user"]
+
+
 def _autostart_enabled() -> bool:
-    if not UNIT_PATH.exists():
+    if not _autostart_unit_path().exists():
         return False
     try:
         r = subprocess.run(
-            ["systemctl", "--user", "is-enabled", UNIT_NAME],
+            ["systemctl", *_systemctl_base(), "is-enabled", UNIT_NAME],
             capture_output=True, text=True, timeout=15,
         )
         return r.stdout.strip() == "enabled"
@@ -1230,7 +1243,7 @@ def _service_info() -> dict:
         "pid": pid,
         "daemon": bool(os.getppid() == 1),
         "systemd_managed": _systemd_managed(),
-        "systemd_unit": UNIT_PATH.exists(),
+        "systemd_unit": _autostart_unit_path().exists(),
         "autostart_enabled": _autostart_enabled(),
         "version": _VERSION,
         "tls": bool(_SERVER_TLS),
