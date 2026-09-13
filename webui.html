@@ -1101,8 +1101,25 @@ function _initUpload() {
   drop.ondrop = e => { e.preventDefault(); drop.classList.remove("on"); if (e.dataTransfer.files.length) addUploadFiles(e.dataTransfer.files); };
 }
 function addUploadFiles(files) {
-  for (const f of files) _uploadQueue.push({file: f, status: "waiting", name: f.name, size: f.size});
+  for (const f of files) _uploadQueue.push({file: f, status: "waiting", name: f.name, size: f.size, progress: 0, stage: "waiting"});
   renderUpQueue();
+}
+function _upChipText(q) {
+  if (q.status === "ok") return "完成";
+  if (q.status === "fail") return "失败";
+  if (q.status === "running") {
+    if (q.stage === "decrypt" || q.progress >= 100) return "解密中…";
+    return "上传中 " + q.progress + "%";
+  }
+  return "等待";
+}
+function updateUpItem(i) {
+  const q = _uploadQueue[i];
+  if (!q) return;
+  const bar = $("#upbar" + i);
+  if (bar) { const vi = bar.querySelector("i"); if (vi) vi.style.width = Math.max(0, Math.min(100, q.progress || 0)) + "%"; }
+  const st = $("#upst" + i);
+  if (st) st.textContent = _upChipText(q);
 }
 function renderUpQueue() {
   const list = $("#upList");
@@ -1111,11 +1128,17 @@ function renderUpQueue() {
   let html = '<div class="boxhead"><h3>上传队列</h3><span class="grow"></span><button class="btn sm" onclick="clearUploadQueue()">清空</button><button class="btn sm primary" onclick="doUpload()" id="upStartBtn">开始解密</button></div>';
   for (let i = 0; i < _uploadQueue.length; i++) {
     const q = _uploadQueue[i];
-    const st = q.status === "ok" ? '<span class="chip ok"><span class="dot"></span>完成</span>'
-      : q.status === "fail" ? '<span class="chip fail"><span class="dot"></span>失败</span>'
-      : q.status === "running" ? '<span class="chip running"><span class="dot"></span>处理中</span>'
-      : '<span class="chip pending"><span class="dot"></span>等待</span>';
-    html += `<div class="frow uprow"><span class="nm">${escHtml(q.name)}</span><span class="fsz">${formatSize(q.size)}</span>${st}`;
+    const cls = q.status === "ok" ? "ok" : q.status === "fail" ? "fail" : q.status === "running" ? "running" : "pending";
+    const dot = q.status === "running" ? "" : '<span class="dot"></span>';
+    html += `<div class="frow uprow"><span class="nm" title="${escHtml(q.error || q.name)}">${escHtml(q.name)}</span><span class="fsz">${formatSize(q.size)}</span>`;
+    if (q.status === "running") {
+      html += `<div class="upbar" id="upbar${i}" style="flex:1;max-width:260px;min-width:120px"><i style="width:${Math.max(1, q.progress || 0)}%"></i></div>`;
+      html += `<span class="chip ${cls}" id="upst${i}"><span class="dot"></span>${_upChipText(q)}</span>`;
+    } else if (q.status === "ok" || q.status === "fail") {
+      html += `<span class="chip ${cls}">${dot}${_upChipText(q)}</span>`;
+    } else {
+      html += `<span class="chip pending"><span class="dot"></span>等待</span>`;
+    }
     if (q.status === "waiting" || q.status === "pending") {
       html += `<button class="btn sm danger" onclick="removeUpload(${i})">移除</button>`;
     }
@@ -1136,28 +1159,50 @@ function markDownloaded(i) {
   _uploadQueue[i].downloaded = true;
   setTimeout(() => renderUpQueue(), 500);
 }
-async function doUpload() {
+function doUpload() {
   const waiting = _uploadQueue.filter(q => q.status === "waiting");
   if (!waiting.length) return;
   const btn = $("#upStartBtn"); if (btn) { btn.disabled = true; btn.textContent = "上传中…"; }
-  for (const q of waiting) {
-    q.status = "running"; renderUpQueue();
+  let cursor = 0;
+  function next() {
+    if (cursor >= waiting.length) {
+      if (btn) { btn.disabled = false; btn.textContent = "开始解密"; }
+      return;
+    }
+    const q = waiting[cursor++];
+    const i = _uploadQueue.indexOf(q);
+    q.status = "running"; q.stage = "upload"; q.progress = 0;
+    renderUpQueue();
     const fd = new FormData();
     fd.append("file", q.file);
-    try {
-      const resp = await fetch("/api/upload", { method: "POST", body: fd });
-      const d = await resp.json();
-      if (d.results && d.results.length && !d.results[0].error) {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/upload");
+    xhr.upload.onprogress = e => {
+      if (e.lengthComputable && e.total > 0) {
+        q.progress = Math.min(99, Math.round((e.loaded / e.total) * 100));
+        updateUpItem(i);
+      }
+    };
+    xhr.upload.onload = () => { q.stage = "decrypt"; q.progress = 100; updateUpItem(i); };
+    xhr.onload = () => {
+      let d = null;
+      try { d = JSON.parse(xhr.responseText); } catch (e) { /* 非 JSON 响应 */ }
+      if (xhr.status >= 200 && xhr.status < 300 && d && d.results && d.results.length && !d.results[0].error) {
         const r = d.results[0];
-        q.status = "ok"; q.downloadUrl = "/api/download?token=" + encodeURIComponent(r.token);
+        q.status = "ok";
+        q.downloadUrl = "/api/download?token=" + encodeURIComponent(r.token);
         q.resultName = r.name;
       } else {
-        q.status = "fail"; q.error = (d.results && d.results[0] && d.results[0].error) || d.error || "未知错误";
+        q.status = "fail";
+        q.error = (d && d.results && d.results[0] && d.results[0].error) || (d && d.error) || ("HTTP " + xhr.status);
       }
-    } catch (e) { q.status = "fail"; q.error = e.message; }
-    renderUpQueue();
+      renderUpQueue();
+      next();
+    };
+    xhr.onerror = () => { q.status = "fail"; q.error = "网络错误 / 上传中断"; renderUpQueue(); next(); };
+    xhr.send(fd);
   }
-  if (btn) { btn.disabled = false; btn.textContent = "开始解密"; }
+  next();
 }
 function _edgeFactor(el, cx, cy) {
   const r = el.getBoundingClientRect();
