@@ -596,6 +596,25 @@ class Handler(BaseHTTPRequestHandler):
         self._write(body)
 
     def _read_body(self) -> bytes:
+        if self.headers.get("Transfer-Encoding", "").lower() == "chunked":
+            chunks = []
+            while True:
+                line = self.rfile.readline()
+                if not line:
+                    break
+                try:
+                    size = int(line.strip().split(b";")[0], 16)
+                except ValueError:
+                    break
+                if size == 0:
+                    while True:
+                        trailer = self.rfile.readline()
+                        if trailer in (b"\r\n", b"\n", b""):
+                            break
+                    break
+                chunks.append(self.rfile.read(size))
+                self.rfile.read(2)
+            return b"".join(chunks)
         length = int(self.headers.get("Content-Length", 0))
         return self.rfile.read(length) if length else b""
 
@@ -944,8 +963,7 @@ class Handler(BaseHTTPRequestHandler):
         if not boundary:
             return self._json({"error": "缺少 boundary"}, 400)
 
-        length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(length)
+        body = self._read_body()
 
         parts = self._parse_multipart(body, boundary)
         results = []
