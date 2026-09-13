@@ -1183,16 +1183,38 @@ def _stop_service():
 
 def _status_service():
     """Check service status."""
-    if not PID_PATH.exists():
-        print("服务未运行")
-        return
+    if PID_PATH.exists():
+        try:
+            pid = int(PID_PATH.read_text("utf-8").strip())
+            os.kill(pid, 0)
+            print(f"服务运行中, PID: {pid}")
+            return
+        except (ValueError, ProcessLookupError):
+            PID_PATH.unlink(missing_ok=True)
+    if _autostart_unit_path().exists():
+        try:
+            r = subprocess.run(
+                ["systemctl", *_systemctl_base(), "is-active", UNIT_NAME],
+                capture_output=True, text=True, timeout=10,
+            )
+            if r.stdout.strip() == "active":
+                print(f"服务运行中 (systemd 托管: {UNIT_NAME})")
+                return
+        except (OSError, subprocess.SubprocessError):
+            pass
+    cfg = CONFIG.get()
+    host = cfg.get("host", "127.0.0.1") or "127.0.0.1"
+    port = cfg.get("port", 8765)
+    url_host = f"[{host}]" if ":" in host else host
     try:
-        pid = int(PID_PATH.read_text("utf-8").strip())
-        os.kill(pid, 0)
-        print(f"服务运行中, PID: {pid}")
-    except (ValueError, ProcessLookupError):
-        print("服务未运行 (残留 PID 文件)")
-        PID_PATH.unlink(missing_ok=True)
+        with urllib.request.urlopen(f"http://{url_host}:{port}/", timeout=3) as r:
+            if r.status == 200:
+                display = "127.0.0.1" if host in ("0.0.0.0", "::") else url_host
+                print(f"服务运行中 (http://{display}:{port} 可访问)")
+                return
+    except Exception:
+        pass
+    print("服务未运行")
 
 
 def _pid_alive(pid: int) -> bool:
