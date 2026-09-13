@@ -567,7 +567,13 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
-        self.wfile.write(body)
+        self._write(body)
+
+    def _write(self, body: bytes):
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
 
     def _html(self, path: Path):
         try:
@@ -580,7 +586,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", len(body))
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
         self.end_headers()
-        self.wfile.write(body)
+        self._write(body)
 
     def _read_body(self) -> bytes:
         length = int(self.headers.get("Content-Length", 0))
@@ -698,7 +704,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Connection", "close")
             self.close_connection = True
             self.end_headers()
-            self.wfile.write(data)
+            self._write(data)
             return
 
         if path == "/api/health":
@@ -732,7 +738,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Connection", "close")
             self.close_connection = True
             self.end_headers()
-            self.wfile.write(data)
+            self._write(data)
             return
 
         self.send_error(404)

@@ -92,7 +92,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Micros
   position:relative}
 .box:hover{transform:translateY(-2px) scale(1.006);border-color:rgba(140,155,210,.42);box-shadow:0 20px 50px rgba(0,0,0,.54)}
 .logs,#outputList,#dirList,#selList,#moveList,#upQueueList{transition:border-color .2s,box-shadow .2s,transform .2s}
-.logs:hover,#outputList:hover,#dirList:hover,#selList:hover,#moveList:hover,#upQueueList:hover{transform:translateY(-2px) scale(1.004);border-color:rgba(140,155,210,.42);box-shadow:0 18px 46px rgba(0,0,0,.5)}
+.logs:hover,#outputList:hover,#dirList:hover,#selList:hover,#moveList:hover,#upQueueList:hover{transform:translateY(-2px);border-color:rgba(140,155,210,.42);box-shadow:0 18px 46px rgba(0,0,0,.5)}
 .box .boxhead{display:flex;align-items:center;gap:10px;margin-bottom:14px}
 .box .boxhead h3{margin:0;font-size:14px;font-weight:650;color:var(--text);letter-spacing:.2px}
 .box .boxhead .step{width:22px;height:22px;border-radius:7px;background:var(--grad);color:#fff;font-size:12px;
@@ -677,6 +677,7 @@ async function loadJobs(silent) {
     }
     html += `<button class="btn sm danger" onclick="deleteJob('${j.id}')">删除</button>`;
     html += `<button class="btn sm" onclick="viewJob('${j.id}')">详情</button>`;
+    html += `<button class="btn sm" onclick="goOutput()">查看输出</button>`;
     html += `</div></td></tr>`;
   }
   html += "</tbody></table>";
@@ -698,6 +699,10 @@ function startJobEvents() {
   es.onerror = () => {};
 }
 
+async function goOutput() {
+  location.hash = "#/output";
+  await loadOutput();
+}
 async function stopJob(id) {
   await api("/api/jobs/stop", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({id}) });
   loadJobs(true);
@@ -1159,50 +1164,68 @@ function markDownloaded(i) {
   _uploadQueue[i].downloaded = true;
   setTimeout(() => renderUpQueue(), 500);
 }
+function _getConcurrency() {
+  let v = 0;
+  if ($("#qConc")) v = parseInt($("#qConc").value) || 0;
+  if (!v && $("#cfg_concurrency")) v = parseInt($("#cfg_concurrency").value) || 0;
+  return Math.max(1, Math.min(16, v || 3));
+}
 function doUpload() {
   const waiting = _uploadQueue.filter(q => q.status === "waiting");
   if (!waiting.length) return;
-  const btn = $("#upStartBtn"); if (btn) { btn.disabled = true; btn.textContent = "上传中…"; }
-  let cursor = 0;
-  function next() {
-    if (cursor >= waiting.length) {
+  const btn = $("#upStartBtn"); if (btn) { btn.disabled = true; btn.textContent = "解密中…"; }
+  const CONCURRENCY = _getConcurrency();
+  let cursor = 0, active = 0, done = 0;
+  function finish() {
+    done++;
+    active--;
+    if (done >= waiting.length) {
       if (btn) { btn.disabled = false; btn.textContent = "开始解密"; }
-      return;
+    } else {
+      pump();
     }
-    const q = waiting[cursor++];
-    const i = _uploadQueue.indexOf(q);
-    q.status = "running"; q.stage = "upload"; q.progress = 0;
-    renderUpQueue();
-    const fd = new FormData();
-    fd.append("file", q.file);
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/api/upload");
-    xhr.upload.onprogress = e => {
-      if (e.lengthComputable && e.total > 0) {
-        q.progress = Math.min(99, Math.round((e.loaded / e.total) * 100));
-        updateUpItem(i);
-      }
-    };
-    xhr.upload.onload = () => { q.stage = "decrypt"; q.progress = 100; updateUpItem(i); };
-    xhr.onload = () => {
-      let d = null;
-      try { d = JSON.parse(xhr.responseText); } catch (e) { /* 非 JSON 响应 */ }
-      if (xhr.status >= 200 && xhr.status < 300 && d && d.results && d.results.length && !d.results[0].error) {
-        const r = d.results[0];
-        q.status = "ok";
-        q.downloadUrl = "/api/download?token=" + encodeURIComponent(r.token);
-        q.resultName = r.name;
-      } else {
-        q.status = "fail";
-        q.error = (d && d.results && d.results[0] && d.results[0].error) || (d && d.error) || ("HTTP " + xhr.status);
-      }
-      renderUpQueue();
-      next();
-    };
-    xhr.onerror = () => { q.status = "fail"; q.error = "网络错误 / 上传中断"; renderUpQueue(); next(); };
-    xhr.send(fd);
   }
-  next();
+  function pump() {
+    while (active < CONCURRENCY && cursor < waiting.length) {
+      const q = waiting[cursor++];
+      const i = _uploadQueue.indexOf(q);
+      active++;
+      _runUpload(q, i, finish);
+    }
+  }
+  pump();
+}
+function _runUpload(q, i, cb) {
+  q.status = "running"; q.stage = "upload"; q.progress = 0;
+  renderUpQueue();
+  const fd = new FormData();
+  fd.append("file", q.file);
+  const xhr = new XMLHttpRequest();
+  xhr.open("POST", "/api/upload");
+  xhr.upload.onprogress = e => {
+    if (e.lengthComputable && e.total > 0) {
+      q.progress = Math.min(99, Math.round((e.loaded / e.total) * 100));
+      updateUpItem(i);
+    }
+  };
+  xhr.upload.onload = () => { q.stage = "decrypt"; q.progress = 100; updateUpItem(i); };
+  xhr.onload = () => {
+    let d = null;
+    try { d = JSON.parse(xhr.responseText); } catch (e) { /* 非 JSON 响应 */ }
+    if (xhr.status >= 200 && xhr.status < 300 && d && d.results && d.results.length && !d.results[0].error) {
+      const r = d.results[0];
+      q.status = "ok";
+      q.downloadUrl = "/api/download?token=" + encodeURIComponent(r.token);
+      q.resultName = r.name;
+    } else {
+      q.status = "fail";
+      q.error = (d && d.results && d.results[0] && d.results[0].error) || (d && d.error) || ("HTTP " + xhr.status);
+    }
+    renderUpQueue();
+    cb();
+  };
+  xhr.onerror = () => { q.status = "fail"; q.error = "网络错误 / 上传中断"; renderUpQueue(); cb(); };
+  xhr.send(fd);
 }
 function _edgeFactor(el, cx, cy) {
   const r = el.getBoundingClientRect();
