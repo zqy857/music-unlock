@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import collections
 import concurrent.futures
+import errno
 import json
 import os
 import queue
@@ -1064,6 +1065,18 @@ class _SecureHTTPServer(ThreadingHTTPServer):
         return sock, addr
 
 
+def _warn_occupied(host: str, port: int) -> None:
+    """端口被占用时的友好提示，区分后台服务与其他程序。"""
+    try:
+        pid = int(PID_PATH.read_text("utf-8").strip())
+    except (ValueError, OSError):
+        pid = None
+    if pid is not None and _pid_alive(pid):
+        log(f"检测到后台服务已在运行 (PID {pid})，监听 {host}:{port}。如需重启请先执行: python3 webui.py --stop", "warn")
+    else:
+        log(f"端口 {port} 已被其他程序占用 (Address already in use)，可用 --port 指定其他端口", "warn")
+
+
 def start_server(host: str, port: int, background: bool = False, open_browser: bool = False, tls: bool = False):
     """Start the HTTP(S) server."""
     global _MAIN_SERVER, _SERVER_TLS
@@ -1078,7 +1091,13 @@ def start_server(host: str, port: int, background: bool = False, open_browser: b
             tls_ctx.minimum_version = ssl.TLSVersion.TLSv1_2
             tls_ctx.load_cert_chain(str(certs[0]), str(certs[1]))
     _SERVER_TLS = tls
-    server = _SecureHTTPServer((host, port), Handler, tls_ctx)
+    try:
+        server = _SecureHTTPServer((host, port), Handler, tls_ctx)
+    except OSError as e:
+        if e.errno == errno.EADDRINUSE:
+            _warn_occupied(host, port)
+            return
+        raise
     _MAIN_SERVER = server
     display_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
     scheme = "https" if tls else "http"
