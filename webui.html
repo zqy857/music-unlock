@@ -108,7 +108,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Micros
 #upBox .upIcon svg{width:15px;height:15px;fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .mode-badge{margin-left:8px}
 #page-unlock .cols .box .boxhead h3{display:flex;align-items:center;flex-wrap:wrap;gap:6px}
-@media(max-width:1060px){.cols{grid-template-columns:1fr}}
+@media(max-width:1060px){.cols{grid-template-columns:minmax(0,1fr)}}
 .btn{border:1px solid rgba(140,155,210,.2);border-radius:11px;padding:9px 16px;font-size:13px;font-weight:600;
   cursor:pointer;transition:.15s;color:var(--text);background:rgba(31,37,54,.25);
   -webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);letter-spacing:.2px}
@@ -141,6 +141,8 @@ label.fld{display:block;font-size:12px;color:var(--muted);margin:0 0 6px;letter-
 .tbl tbody tr:hover{background:rgba(124,92,255,.05)}
 .tbl tbody tr:last-child td{border-bottom:none}
 .fn{max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:default}
+#jobList,#recentJobs{overflow-x:auto;-webkit-overflow-scrolling:touch}
+#jobList .tbl,#recentJobs .tbl{min-width:560px}
 .fsz{color:var(--faint);font-size:12px;white-space:nowrap}
 .fmt{font-size:11px;padding:2px 9px;border-radius:999px;background:rgba(124,92,255,.16);color:var(--accent2);
   font-weight:600;letter-spacing:.4px;flex:none}
@@ -240,7 +242,7 @@ label.fld{display:block;font-size:12px;color:var(--muted);margin:0 0 6px;letter-
   .main{padding:16px 14px 72px}
   .phead{margin-bottom:16px}
   .phead h2{font-size:19px}
-  .cards{grid-template-columns:repeat(2,1fr);gap:10px}
+  .cards{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
   .card{padding:14px}
   .card .v{font-size:19px}
   .box{padding:16px;border-radius:14px}
@@ -260,18 +262,20 @@ label.fld{display:block;font-size:12px;color:var(--muted);margin:0 0 6px;letter-
   #upList .uprow .fsz{flex:none}
   #upList .uprow .upbar{flex:1 1 auto!important;max-width:none!important;min-width:auto!important;width:auto}
   #upList .uprow .btn,.uprow .chip{flex:none}
-  #jobList,#recentJobs{overflow-x:auto;-webkit-overflow-scrolling:touch}
-  #jobList .tbl,#recentJobs .tbl{min-width:560px;width:100%}
+  #outputList .frow{flex-wrap:wrap}
+  #outputList .frow .nm{flex:1 1 100%;white-space:normal;word-break:break-all;line-height:1.5;font-size:13.5px}
+  #outputList .frow .fmt,#outputList .frow .fsz,#outputList .frow .grow,#outputList .frow .btn{flex:none;margin-top:2px}
   .bread{font-size:12px;flex-wrap:wrap}
+  .logs{overflow-wrap:anywhere;word-break:break-word}
   .scroll{max-height:46vh;-webkit-overflow-scrolling:touch}
   .row.grow-btns{flex-wrap:nowrap}
   .row.grow-btns .btn{flex:1;white-space:nowrap;padding:9px 6px;font-size:12.5px}
-  input[type=text],input[type=number],select{font-size:16px}
+  input[type=text],input[type=number],select{font-size:16px;min-width:0}
 }
 @media(max-width:480px){
-  .cards{grid-template-columns:1fr 1fr;font-size:.95em}
+  .cards{grid-template-columns:minmax(0,1fr) minmax(0,1fr);font-size:.95em}
   .card .v.small{font-size:12px}
-  .jobmeta{grid-template-columns:1fr 1fr}
+  .jobmeta{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
   .boxhead{flex-wrap:wrap}
   .side .brand b{display:none}
   .side .brand{padding:10px 10px}
