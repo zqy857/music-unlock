@@ -552,7 +552,7 @@ html{scroll-behavior:smooth}
       </div>
       <div class="box" style="max-width:560px">
         <div class="boxhead"><h3>支持格式</h3></div>
-        <div id="fmtList" style="display:flex;flex-direction:column;gap:8px;padding:2px 0 4px;max-width:100%">
+        <div id="fmtList" style="display:flex;flex-wrap:wrap;gap:8px;padding:2px 0 4px">
           <span class="hint">加载中…</span>
         </div>
         <div class="hint" style="margin-top:6px">零第三方依赖，纯 Python 实现解析与解密</div>
@@ -989,12 +989,8 @@ async function loadFormats() {
   if (d.error || !d.formats) return;
   const box = $("#fmtList");
   box.innerHTML = d.formats.map(f => {
-    const tags = (f.suffixes || []).map(s =>
-      `<code style="font-family:inherit;font-size:12px;background:rgba(124,92,255,.10);border:1px solid rgba(124,92,255,.25);color:var(--accent2);border-radius:6px;padding:2px 7px;white-space:nowrap">${escHtml(s)}</code>`).join("");
-    return `<div style="display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap">
-      <b style="flex:none;min-width:52px;font-size:13px">${escHtml(f.name)}</b>
-      <span style="flex:1;display:flex;flex-wrap:wrap;gap:5px">${tags || '<span class="hint">（无）</span>'}</span>
-    </div>`;
+    const suffixes = (f.suffixes || []).join(", ");
+    return `<span class="chip" style="padding:5px 12px;font-size:12px"><span class="dot" style="background:var(--accent);box-shadow:0 0 6px var(--accent)"></span><b>${f.name}</b>${suffixes ? " <span class='hint'>(" + suffixes + ")</span>" : ""}</span>`;
   }).join("");
 }
 
@@ -1310,9 +1306,7 @@ function _runUpload(q, i, cb) {
       q.resultName = r.name;
     } else {
       q.status = "fail";
-      const r0 = d && d.results && d.results[0];
-      q.error = (r0 && r0.error) || (d && d.error)
-        || ((d && d.results && d.results.length === 0) ? "服务器未收到有效文件（上传请求可能未完整发送）" : ("HTTP " + xhr.status));
+      q.error = (d && d.results && d.results[0] && d.results[0].error) || (d && d.error) || ("HTTP " + xhr.status);
     }
     renderUpQueue();
     cb();
