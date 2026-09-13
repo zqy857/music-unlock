@@ -9,6 +9,7 @@
 ![deps](https://img.shields.io/badge/dependencies-none-success)
 ![formats](https://img.shields.io/badge/formats-KGM%20KWM%20QMC%20NCM-purple)
 ![ui](https://img.shields.io/badge/UI-Web%2B%20CLI-orange)
+![license](https://img.shields.io/badge/license-MIT-green)
 
 命令行批量解密 · 浏览器控制台（SSE 实时进度、上传即解、批量任务、输出管理）
 </div>
