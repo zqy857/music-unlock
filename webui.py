@@ -24,6 +24,7 @@ import os
 import queue
 import secrets
 import shutil
+import socket
 import ssl
 import subprocess
 import sys
@@ -125,7 +126,7 @@ def _config_path() -> Path:
 
 class Config:
     DEFAULTS = {
-        "host": "0.0.0.0",
+        "host": "::",
         "port": 8765,
         "outdir": "",
         "force": False,
@@ -1078,6 +1079,8 @@ class _SecureHTTPServer(ThreadingHTTPServer):
 
     def __init__(self, addr, handler, tls_ctx=None):
         self._tls_ctx = tls_ctx
+        if isinstance(addr, tuple) and addr and ":" in addr[0]:
+            self.address_family = socket.AF_INET6
         super().__init__(addr, handler)
 
     def get_request(self):
@@ -1255,7 +1258,7 @@ def main():
         return _status_service()
 
     cfg = CONFIG.get()
-    host = args.host or cfg.get("host", "0.0.0.0")
+    host = args.host or cfg.get("host", "::")
     port = args.port or cfg.get("port", 8765)
     tls = cfg.get("tls", False) if args.tls is None else args.tls
 
