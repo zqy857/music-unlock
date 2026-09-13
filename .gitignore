@@ -1,0 +1,19 @@
+# 加密音乐 / 解密产物
+*.kgm
+*.kgma
+*.vpr
+*.kgg
+*.kgm.flac
+*.kgg.flac
+*.flac
+
+# 解密密钥资产（本地不受影响；避免公开仓库 DMCA 下架风险）
+music_unlock/assets/kugou_key.xz
+
+# 输出与缓存
+output/
+__pycache__/
+*.py[cod]
+
+# 个人本地配置
+config.json
