@@ -892,6 +892,8 @@ class Handler(BaseHTTPRequestHandler):
             if not shutil.which("systemctl"):
                 return self._json({"error": "系统未检测到 systemd，无法设置开机自启"}, 400)
             unit_path = _autostart_unit_path()
+            if unit_path == _system_unit_path() and os.geteuid() != 0:
+                return self._json({"error": "开机自启由系统级 systemd 单元管理，普通用户无法修改（如需调整请用 sudo 操作 systemctl）"}, 403)
             wanted = "multi-user.target" if os.geteuid() == 0 else "default.target"
             try:
                 if enable:
@@ -1201,15 +1203,21 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
+def _system_unit_path() -> Path:
+    return Path("/etc/systemd/system") / UNIT_NAME
+
+
 def _autostart_unit_path() -> Path:
-    """root 用系统级 unit，普通用户用 user 级 unit。"""
-    if os.geteuid() == 0:
-        return Path("/etc/systemd/system") / UNIT_NAME
+    """root 或用系统级托管时用系统单元，否则用用户单元。"""
+    if os.geteuid() == 0 or _system_unit_path().exists():
+        return _system_unit_path()
     return UNIT_DIR / UNIT_NAME
 
 
 def _systemctl_base() -> list[str]:
-    return [] if os.geteuid() == 0 else ["--user"]
+    if os.geteuid() == 0 or _system_unit_path().exists():
+        return []
+    return ["--user"]
 
 
 def _autostart_enabled() -> bool:
