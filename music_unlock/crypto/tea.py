@@ -108,9 +108,6 @@ def decrypt_key(raw_key: bytes) -> bytes:
     if len(raw) < 16:
         raise ValueError("key length is too short")
 
-    if raw.startswith(_RAW_KEY_PREFIX_V2):
-        raw = _derive_key_v2(raw[len(_RAW_KEY_PREFIX_V2):])
-
     simple_key = simple_make_key(106, 8)
     tea_key = bytearray(16)
     for i in range(8):
@@ -119,24 +116,6 @@ def decrypt_key(raw_key: bytes) -> bytes:
 
     rs = decrypt_tencent_tea(raw[8:], bytes(tea_key))
     return raw[:8] + rs
-
-
-_RAW_KEY_PREFIX_V2 = b"QQMusic EncV2,Key:"
-
-_DERIVE_V2_KEY1 = bytes([
-    0x33, 0x38, 0x36, 0x5A, 0x4A, 0x59, 0x21, 0x40,
-    0x23, 0x2A, 0x24, 0x25, 0x5E, 0x26, 0x29, 0x28,
-])
-_DERIVE_V2_KEY2 = bytes([
-    0x2A, 0x2A, 0x23, 0x21, 0x28, 0x23, 0x24, 0x25,
-    0x26, 0x5E, 0x61, 0x31, 0x63, 0x5A, 0x2C, 0x54,
-])
-
-
-def _derive_key_v2(raw: bytes) -> bytes:
-    buf = decrypt_tencent_tea(raw, _DERIVE_V2_KEY1)
-    buf = decrypt_tencent_tea(buf, _DERIVE_V2_KEY2)
-    return base64.b64decode(buf, validate=False)
 
 
 SIMPLE_MAKE_KEY_106_8 = bytes([0x69, 0x56, 0x46, 0x38, 0x2B, 0x20, 0x15, 0x0B])

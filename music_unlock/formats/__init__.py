@@ -58,9 +58,8 @@ from .kgm import KgmFormat
 from .kwm import KwmFormat
 from .ncm import NcmFormat
 from .qmc import QmcFormat
-from .kgg import KggFormat
 
-FORMATS = (KgmFormat(), KggFormat(), KwmFormat(), NcmFormat(), QmcFormat())
+FORMATS = (KgmFormat(), KwmFormat(), NcmFormat(), QmcFormat())
 
 
 def detect_format(data: bytes, extension: str) -> BaseFormat | None:

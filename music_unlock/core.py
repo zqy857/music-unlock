@@ -109,11 +109,6 @@ def selftest() -> int:
     ok &= _step("KWM 自反性", _kwm_roundtrip(kwm))
     ok &= _step("NCM 密钥盒自反性", _ncm_box_roundtrip(ncm))
 
-    from .crypto import kgg_db as _kgg_db
-    print("== KGG (新酷狗) ==")
-    ok &= _step("KGG 页派生官方向量", _kgg_derive_ok(_kgg_db))
-    ok &= _step("KGG db 加密往返", _kgg_db_roundtrip(_kgg_db))
-
     print("全部通过" if ok else "存在失败项")
     return 0 if ok else 1
 
@@ -121,63 +116,6 @@ def selftest() -> int:
 def _step(label: str, ok: bool) -> bool:
     print(f"{label}: {'通过' if ok else '失败'}")
     return ok
-
-
-def _kgg_derive_ok(kgg_db) -> bool:
-    return (
-        kgg_db.derive_page_aes_key(0, kgg_db.DEFAULT_MASTER_KEY).hex()
-        == "1962c05fa2ebbe2428ff522b9e03ead4"
-        and kgg_db.derive_page_aes_iv(0).hex()
-        == "055a673593892ddf3ab3b3c621c34802"
-    )
-
-
-def _kgg_db_roundtrip(kgg_db) -> bool:
-    import struct
-    import sqlite3
-    import tempfile
-
-    from .crypto.aes import AES128CBC
-
-    page = kgg_db.DB_PAGE_SIZE
-    master = kgg_db.DEFAULT_MASTER_KEY
-
-    def _mk_plain() -> bytes:
-        with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "k.db"
-            c = sqlite3.connect(str(p))
-            c.execute("CREATE TABLE ShareFileItems (EncryptionKeyId TEXT, EncryptionKey TEXT)")
-            c.execute("INSERT INTO ShareFileItems VALUES ('k','v')")
-            c.commit()
-            c.close()
-            raw = p.read_bytes()
-        plain = bytearray(raw)
-        plain[0:16] = b"SQLite format 3\x00"
-        plain[0x14:0x18] = struct.pack("<I", 0x20204000)
-        return bytes(plain)
-
-    def _enc_page(plain: bytes, n: int) -> bytes:
-        return AES128CBC(
-            kgg_db.derive_page_aes_key(n, master),
-            kgg_db.derive_page_aes_iv(n),
-        ).encrypt(plain)
-
-    try:
-        plain = _mk_plain()
-        if len(plain) % page != 0:
-            return False
-        out = bytearray(len(plain))
-        ct = _enc_page(plain[0x10:], 1)
-        out[0x00:0x08] = plain[0x00:0x08]
-        out[0x08:0x10] = ct[0:8]
-        out[0x10:0x18] = plain[0x10:0x18]
-        out[0x18:] = ct[8:]
-        for n in range(2, len(plain) // page + 1):
-            s = (n - 1) * page
-            out[s:s + page] = _enc_page(plain[s:s + page], n)
-        return kgg_db.decrypt_pc_database(bytes(out)) == plain
-    except Exception:
-        return False
 
 
 def _selftest_aes(aes_mod) -> bool:
