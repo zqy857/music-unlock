@@ -948,23 +948,14 @@ class Handler(BaseHTTPRequestHandler):
         if not boundary:
             return self._json({"error": "缺少 boundary"}, 400)
 
-        log(f"上传解析: content-type={content_type.split(';')[0]} "
-            f"transfer={self.headers.get('Transfer-Encoding') or '-'} "
-            f"length={self.headers.get('Content-Length') or '-'} "
-            f"form={self.headers.get('Content-Disposition', '-')} "
-            f"agent={self.headers.get('User-Agent', '-')[:80]}")
-
         body = self._read_body()
-        log(f"上传解析: 已读取请求体 {len(body)} 字节")
 
         parts = self._parse_multipart(body, boundary)
-        log(f"上传解析: 识别到 {len(parts)} 个文件字段")
         results = []
         for fname, fdata in parts:
             if not fname or not fdata:
                 continue
             ext = Path(fname).suffix
-            log(f"上传解析: 文件 {fname!r} {len(fdata)} 字节 后缀 {ext or '(无)'}")
             try:
                 result = decrypt_bytes(fdata, ext)
                 out_ext = sniff_audio(result.data) or result.ext or ""
@@ -983,13 +974,10 @@ class Handler(BaseHTTPRequestHandler):
                     "size": len(result.data),
                     "title": result.title,
                 })
-                log(f"上传解密: 成功 -> {out_name} ({len(result.data)} 字节)")
             except DecryptError as e:
                 results.append({"name": fname, "error": str(e)})
-                log(f"上传解密: 失败 {fname!r}: {e}", "warn")
             except Exception as e:
                 results.append({"name": fname, "error": str(e)})
-                log(f"上传解密: 异常 {fname!r}: {e}", "warn")
         return self._json({"results": results})
 
     def _parse_multipart(self, body: bytes, boundary: str) -> list[tuple[str, bytes]]:
