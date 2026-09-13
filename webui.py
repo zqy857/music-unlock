@@ -41,7 +41,29 @@ from music_unlock.sniff import sniff_audio
 
 APP_NAME = "music-unlock"
 PROJECT_ROOT = Path(__file__).resolve().parent
-BASE_DIR = Path.home() / ("." + APP_NAME)
+
+
+def _resolve_base_dir() -> Path:
+    """状态目录：$MUSIC_UNLOCK_DATA > ~/.music-unlock > 项目目录。
+
+    有的 NAS 上普通用户对 home 没有写权限，就直接回退到项目目录。
+    """
+    env = os.environ.get("MUSIC_UNLOCK_DATA")
+    if env:
+        base = Path(env).expanduser()
+        base.mkdir(parents=True, exist_ok=True)
+        return base
+    base = Path.home() / ("." + APP_NAME)
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+        return base
+    except OSError:
+        fallback = PROJECT_ROOT / ("." + APP_NAME)
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
+
+
+BASE_DIR = _resolve_base_dir()
 HOME_CONFIG = BASE_DIR / "config.json"
 CONFIG_PATH = PROJECT_ROOT / "config.json"
 JOBS_PATH = BASE_DIR / "jobs.json"
