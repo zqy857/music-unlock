@@ -102,7 +102,7 @@ def _config_path() -> Path:
 
 class Config:
     DEFAULTS = {
-        "host": "127.0.0.1",
+        "host": "0.0.0.0",
         "port": 8765,
         "outdir": "",
         "force": False,
@@ -1214,7 +1214,7 @@ def main():
         return _status_service()
 
     cfg = CONFIG.get()
-    host = args.host or cfg.get("host", "127.0.0.1")
+    host = args.host or cfg.get("host", "0.0.0.0")
     port = args.port or cfg.get("port", 8765)
     tls = cfg.get("tls", False) if args.tls is None else args.tls
 
