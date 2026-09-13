@@ -42,19 +42,6 @@ APP_NAME = "music-unlock"
 PROJECT_ROOT = Path(__file__).resolve().parent
 BASE_DIR = Path.home() / ("." + APP_NAME)
 HOME_CONFIG = BASE_DIR / "config.json"
-
-_HTTP_HINT_HTML = '''<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><title>请使用 http 访问</title>
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<style>body{font-family:system-ui,sans-serif;background:#13181e;color:#e8eef5;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}
-.box{max-width:34rem;padding:2rem;background:#1c242e;border:1px solid #2a3441;border-radius:12px}
-h1{font-size:1.15rem;margin:0 0 .75rem}code{background:#0009;padding:.15rem .4rem;border-radius:6px}
-p{line-height:1.7;margin:.25rem 0}a{color:#6db3ff}</style></head><body><div class="box">
-<h1>这个服务只支持 HTTP 访问</h1>
-<p>检测到手机/浏览器发送的是加密连接（HTTPS/TLS）请求，但本服务是本地 HTTP 服务。</p>
-<p>请在地址栏完整输入：<code>http://服务器IP:端口</code>（开头明确写 <code>http://</code>，不要使用 <code>https://</code>）。</p>
-<p>例如：<code>http://192.168.1.9:8765</code></p>
-</div></body></html>'''.encode("utf-8")
 CONFIG_PATH = PROJECT_ROOT / "config.json"
 JOBS_PATH = BASE_DIR / "jobs.json"
 LOG_PATH = BASE_DIR / "service.log"
@@ -582,17 +569,6 @@ class Handler(BaseHTTPRequestHandler):
         if "200" not in (args[1] if len(args) > 1 else ""):
             log(msg, "debug")
 
-    def send_error(self, code, message=None, explain=None):
-        if code == 400 and getattr(self, "raw_requestline", b"").startswith(b"\x16\x03"):
-            self.send_response(421)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(_HTTP_HINT_HTML)))
-            self.end_headers()
-            self.wfile.write(_HTTP_HINT_HTML)
-            log("收到 TLS/非 HTTP 请求: 手机浏览器可能使用 https:// 访问,已提示改用 http://", "warn")
-            return
-        super().send_error(code, message, explain)
-
     def _json(self, data, status=200):
         body = json.dumps(data, ensure_ascii=False).encode()
         self.send_response(status)
@@ -689,12 +665,6 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         qs = dict(urllib.parse.parse_qsl(parsed.query))
-
-        if path == "/favicon.ico":
-            self.send_response(204)
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-            return
 
         if path == "/api/events":
             return self._handle_sse()
